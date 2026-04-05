@@ -5,8 +5,9 @@ import { Platform } from 'react-native';
  */
 
 // Load from .env
-const WEB_API_URL = process.env.EXPO_PUBLIC_WEB_API_URL;       // for web (localhost)
-const MOBILE_API_URL = process.env.EXPO_PUBLIC_MOBILE_API_URL; // for mobile devices
+const EXPO_PUBLIC_API_URL = process.env.EXPO_PUBLIC_API_URL;
+const WEB_API_URL = "http://localhost:3001";
+const MOBILE_API_URL = EXPO_PUBLIC_API_URL || "http://172.19.8.0:3001"; // for mobile devices
 const PROD_API_URL = process.env.EXPO_PUBLIC_PROD_API_URL;     // for production server
 
 // Determine current environment
@@ -22,8 +23,8 @@ const ENV = {
 // Validation Check (Critical for Professional Apps)
 // This prevents the app from running if the developer forgot to set up the .env
 if (!ENV.apiUrl) {
-  const errorMsg = `CONFIG ERROR: EXPO_PUBLIC_API_URL is not defined. 
-  Check your .env.${__DEV__ ? 'development' : 'production'} file.`;
+  const errorMsg = `CONFIG ERROR: API URL is not defined. 
+  Set EXPO_PUBLIC_API_URL for mobile testing.`;
 
   if (__DEV__) {
     console.error(errorMsg);
@@ -40,6 +41,9 @@ export const ENDPOINTS = {
   LOGIN: '/auth/login',
   SIGNUP: '/auth/signup',
   LOGOUT: '/auth/logout',
+  RESTAURANT_REGISTER: '/pickup-person/register',
+  RESTAURANT_LOGIN: '/pickup-person/login',
+
 
   // User Role
   //   USER_PROFILE: '/user/profile',
