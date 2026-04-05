@@ -58,8 +58,7 @@ const SignupScreen = () => {
 
   const [userPicture, setUserPicture] = useState<any>(null);
   const [userDocument, setUserDocument] = useState<any>(null);
-  const [vehiclePicture, setVehiclePicture] = useState<any>(null);
-  const [vehicleDocument, setVehicleDocument] = useState<any>(null);
+
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -91,10 +90,7 @@ const SignupScreen = () => {
 
     if (!userPicture) nextErrors.userPicture = "User picture is required";
     if (!userDocument) nextErrors.userDocument = "User document is required";
-    if (!vehiclePicture) nextErrors.vehiclePicture = "Vehicle picture is required";
-    if (!vehicleDocument) {
-      nextErrors.vehicleDocument = "Vehicle document is required";
-    }
+
 
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
@@ -141,8 +137,7 @@ const SignupScreen = () => {
     setPassword("");
     setUserPicture(null);
     setUserDocument(null);
-    setVehiclePicture(null);
-    setVehicleDocument(null);
+
     setErrors({});
   };
 
@@ -161,8 +156,7 @@ const SignupScreen = () => {
           password,
           userPicture,
           userDocument,
-          vehiclePicture,
-          vehicleDocument,
+
         }),
       );
       resetForm();
@@ -317,42 +311,7 @@ const SignupScreen = () => {
                   <Text style={styles.error}>{errors.userDocument}</Text>
                 ) : null}
 
-                <TouchableOpacity
-                  style={styles.uploadBtn}
-                  onPress={() => pickImage(setVehiclePicture)}
-                >
-                  <MaterialIcons
-                    name="directions-car"
-                    size={20}
-                    color={Colors.default.primary}
-                  />
-                  <Text style={styles.uploadBtnText}>
-                    {renderUploadStatus(vehiclePicture, "Select Vehicle Picture")}
-                  </Text>
-                </TouchableOpacity>
-                {errors.vehiclePicture ? (
-                  <Text style={styles.error}>{errors.vehiclePicture}</Text>
-                ) : null}
 
-                <TouchableOpacity
-                  style={styles.uploadBtn}
-                  onPress={() => pickDocument(setVehicleDocument)}
-                >
-                  <MaterialIcons
-                    name="description"
-                    size={20}
-                    color={Colors.default.primary}
-                  />
-                  <Text style={styles.uploadBtnText}>
-                    {renderUploadStatus(
-                      vehicleDocument,
-                      "Select Vehicle Document",
-                    )}
-                  </Text>
-                </TouchableOpacity>
-                {errors.vehicleDocument ? (
-                  <Text style={styles.error}>{errors.vehicleDocument}</Text>
-                ) : null}
               </View>
 
               <TouchableOpacity

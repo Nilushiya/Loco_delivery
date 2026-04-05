@@ -41,8 +41,8 @@ export const ENDPOINTS = {
   LOGIN: '/auth/login',
   SIGNUP: '/auth/signup',
   LOGOUT: '/auth/logout',
-  RESTAURANT_REGISTER: '/pickup-person/register',
-  RESTAURANT_LOGIN: '/pickup-person/login',
+  RESTAURANT_REGISTER: '/delivery-person/register',
+  RESTAURANT_LOGIN: '/delivery-person/login',
 
 
   // User Role
