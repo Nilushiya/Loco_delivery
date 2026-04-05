@@ -81,14 +81,7 @@ const buildRestaurantRegistrationFormData = async (payload) => {
     "userDocument",
     await normalizeAsset(payload.userDocument, "user-document.pdf"),
   );
-  formData.append(
-    "vehiclePicture",
-    await normalizeAsset(payload.vehiclePicture, "vehicle-picture.jpg"),
-  );
-  formData.append(
-    "vehicleDocument",
-    await normalizeAsset(payload.vehicleDocument, "vehicle-document.pdf"),
-  );
+
 
   return formData;
 };
