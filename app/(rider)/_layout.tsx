@@ -21,7 +21,7 @@ export default function RiderLayout() {
                 }}
             />
             <Tabs.Screen
-                name="deliveryRequests"
+                name="orders"
                 options={{
                     title: 'Orders',
                     tabBarIcon: ({ color, size }) => (
@@ -46,6 +46,12 @@ export default function RiderLayout() {
             />
             <Tabs.Screen
                 name="activeOrder"
+                options={{
+                    href: null,
+                }}
+            />
+            <Tabs.Screen
+                name="deliveryRequests"
                 options={{
                     href: null,
                 }}
