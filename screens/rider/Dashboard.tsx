@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Modal, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
 import apiClient from '../../api/client';
 import { OrderCard } from '../../components/OrderCard';
 
@@ -13,7 +12,6 @@ export const Dashboard = () => {
     const [status, setStatus] = useState<'idle' | 'loading' | 'succeeded' | 'failed'>('idle');
     const [assignedStation, setAssignedStation] = useState('Loading...');
 
-    const [activeTab, setActiveTab] = useState<'Pending' | 'Delivered'>('Pending');
     const [trainFilter, setTrainFilter] = useState('');
     const [seatFilter, setSeatFilter] = useState('');
     const [popupOrderId, setPopupOrderId] = useState<string | null>(null);
@@ -23,19 +21,15 @@ export const Dashboard = () => {
     const loadOrders = async () => {
         try {
             setStatus('loading');
-            const deliveryPersonId = await SecureStore.getItemAsync('userId');
-            if (!deliveryPersonId) {
-                setStatus('failed');
-                return;
-            }
-            
-            const response = await apiClient.get(`/order/delivery/get?deliveryPersonId=${deliveryPersonId}`);
+            const response = await apiClient.get(`/order/get-by-status/HANDED_OVER`);
             
             let fetchedOrders: any[] = [];
             if (response.data && Array.isArray(response.data.orders)) {
                 fetchedOrders = response.data.orders;
             } else if (response.data && Array.isArray(response.data.data)) {
                 fetchedOrders = response.data.data;
+            } else if (Array.isArray(response.data)) {
+                fetchedOrders = response.data;
             }
             
             const mappedOrders = fetchedOrders.map((item: any) => ({
@@ -43,9 +37,11 @@ export const Dashboard = () => {
                 customerName: item.user ? `${item.user.firstname || ''} ${item.user.lastname || ''}`.trim() : 'Unknown',
                 customerPhone: item.user?.phoneNumber || '',
                 trainName: item.train?.trainName || item.train?.name || 'Train',
-                trainNumber: item.train?.trainNo || item.train?.id || '',
+                trainNumber: item.train?.trainNo || item.train?.pin || item.train?.id || '',
                 seatNumber: item.seatNumber || '',
-                foodItems: Array.isArray(item.items) ? item.items.map((i: any) => ({ name: i.menuItem?.name || 'Item', quantity: i.quantity || 1 })) : [],
+                foodItems: Array.isArray(item.items)
+                    ? item.items.map((i: any) => ({ name: i.item?.name || i.menuItem?.name || 'Item', quantity: i.quantity || 1 }))
+                    : [],
                 totalAmount: item.total || 0,
                 status: item.status, 
                 stationId: item.stationId?.toString() || ''
@@ -75,11 +71,10 @@ export const Dashboard = () => {
     }, []);
 
     useEffect(() => {
-        const pendingOrders = orders.filter(o => o.status === 'OUT_FOR_DELIVERY');
-        const pendingIds = new Set(pendingOrders.map(o => o.id));
+        const currentIds = new Set(orders.map(o => o.id));
 
         if (didInitRef.current) {
-            const newOrders = pendingOrders.filter(o => !prevOrderIdsRef.current.has(o.id));
+            const newOrders = orders.filter(o => !prevOrderIdsRef.current.has(o.id));
             if (newOrders.length > 0) {
                 setPopupOrderId(newOrders[0].id);
             }
@@ -87,15 +82,13 @@ export const Dashboard = () => {
             didInitRef.current = true;
         }
 
-        prevOrderIdsRef.current = pendingIds;
+        prevOrderIdsRef.current = currentIds;
     }, [orders]);
 
     const filteredOrders = orders.filter(order => {
-        const expectedStatus = activeTab === 'Pending' ? 'OUT_FOR_DELIVERY' : 'DELIVERED';
-        const matchTab = order.status === expectedStatus;
         const matchTrain = !trainFilter || order.trainNumber?.includes(trainFilter) || order.trainName?.toLowerCase().includes(trainFilter.toLowerCase());
         const matchSeat = !seatFilter || order.seatNumber?.toLowerCase().includes(seatFilter.toLowerCase());
-        return matchTab && matchTrain && matchSeat;
+        return matchTrain && matchSeat;
     });
 
     const renderHeader = () => (
@@ -130,23 +123,6 @@ export const Dashboard = () => {
                     placeholderTextColor="#999"
                 />
             </View>
-        </View>
-    );
-
-    const renderTabs = () => (
-        <View style={styles.tabsContainer}>
-            <TouchableOpacity
-                style={[styles.tab, activeTab === 'Pending' && styles.activeTab]}
-                onPress={() => setActiveTab('Pending')}
-            >
-                <Text style={[styles.tabText, activeTab === 'Pending' && styles.activeTabText]}>Pending</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-                style={[styles.tab, activeTab === 'Delivered' && styles.activeTab]}
-                onPress={() => setActiveTab('Delivered')}
-            >
-                <Text style={[styles.tabText, activeTab === 'Delivered' && styles.activeTabText]}>Delivered</Text>
-            </TouchableOpacity>
         </View>
     );
 
@@ -214,7 +190,6 @@ export const Dashboard = () => {
             )}
             {renderHeader()}
             {renderFilters()}
-            {renderTabs()}
 
             <FlatList
                 data={filteredOrders}
@@ -232,7 +207,7 @@ export const Dashboard = () => {
                 ListEmptyComponent={
                     <View style={styles.emptyContainer}>
                         <Ionicons name="documents-outline" size={64} color="#DDD" />
-                        <Text style={styles.emptyText}>No {activeTab.toLowerCase()} orders found.</Text>
+                        <Text style={styles.emptyText}>No new orders found.</Text>
                     </View>
                 }
             />
@@ -304,30 +279,6 @@ const styles = StyleSheet.create({
         flex: 1,
         fontSize: 14,
         color: '#333',
-    },
-    tabsContainer: {
-        flexDirection: 'row',
-        backgroundColor: '#FFF',
-        borderBottomWidth: 1,
-        borderBottomColor: '#EEE',
-    },
-    tab: {
-        flex: 1,
-        paddingVertical: 14,
-        alignItems: 'center',
-        borderBottomWidth: 2,
-        borderBottomColor: 'transparent',
-    },
-    activeTab: {
-        borderBottomColor: '#FF5A1F',
-    },
-    tabText: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: '#888',
-    },
-    activeTabText: {
-        color: '#FF5A1F',
     },
     listContainer: {
         paddingBottom: 24,
