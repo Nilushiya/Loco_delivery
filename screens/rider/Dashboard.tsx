@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, FlatList, Modal, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import apiClient from '../../api/client';
 import { OrderCard } from '../../components/OrderCard';
@@ -16,6 +16,9 @@ export const Dashboard = () => {
     const [activeTab, setActiveTab] = useState<'Pending' | 'Delivered'>('Pending');
     const [trainFilter, setTrainFilter] = useState('');
     const [seatFilter, setSeatFilter] = useState('');
+    const [popupOrderId, setPopupOrderId] = useState<string | null>(null);
+    const prevOrderIdsRef = useRef<Set<string>>(new Set());
+    const didInitRef = useRef(false);
 
     const loadOrders = async () => {
         try {
@@ -70,6 +73,22 @@ export const Dashboard = () => {
         }, 30000);
         return () => clearInterval(intervalId);
     }, []);
+
+    useEffect(() => {
+        const pendingOrders = orders.filter(o => o.status === 'OUT_FOR_DELIVERY');
+        const pendingIds = new Set(pendingOrders.map(o => o.id));
+
+        if (didInitRef.current) {
+            const newOrders = pendingOrders.filter(o => !prevOrderIdsRef.current.has(o.id));
+            if (newOrders.length > 0) {
+                setPopupOrderId(newOrders[0].id);
+            }
+        } else {
+            didInitRef.current = true;
+        }
+
+        prevOrderIdsRef.current = pendingIds;
+    }, [orders]);
 
     const filteredOrders = orders.filter(order => {
         const expectedStatus = activeTab === 'Pending' ? 'OUT_FOR_DELIVERY' : 'DELIVERED';
@@ -139,8 +158,60 @@ export const Dashboard = () => {
         );
     }
 
+    const popupOrder = popupOrderId ? orders.find(o => o.id === popupOrderId) : null;
+
     return (
         <View style={styles.container}>
+            {popupOrder && (
+                <Modal transparent animationType="slide" visible={!!popupOrder}>
+                    <View style={styles.modalOverlay}>
+                        <View style={styles.modalContent}>
+                            <View style={styles.modalHeader}>
+                                <Text style={styles.modalTitle}>New Order</Text>
+                                <Text style={styles.modalOrderId}>{popupOrder.id}</Text>
+                            </View>
+
+                            <View style={styles.modalRow}>
+                                <Ionicons name="train-outline" size={18} color="#FF5A1F" />
+                                <Text style={styles.modalText}>
+                                    {popupOrder.trainNumber} - {popupOrder.trainName}
+                                </Text>
+                            </View>
+                            <View style={styles.modalRow}>
+                                <Ionicons name="apps-outline" size={18} color="#FF5A1F" />
+                                <Text style={styles.modalText}>Seat: {popupOrder.seatNumber}</Text>
+                            </View>
+                            <View style={styles.modalRow}>
+                                <Ionicons name="cash-outline" size={18} color="#188048" />
+                                <Text style={[styles.modalText, styles.modalAmount]}>
+                                    Rs. {popupOrder.totalAmount}
+                                </Text>
+                            </View>
+
+                            <View style={styles.modalActions}>
+                                <TouchableOpacity
+                                    style={[styles.modalBtn, styles.modalDismissBtn]}
+                                    onPress={() => setPopupOrderId(null)}
+                                >
+                                    <Text style={styles.modalDismissText}>Dismiss</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.modalBtn, styles.modalViewBtn]}
+                                    onPress={() => {
+                                        setPopupOrderId(null);
+                                        router.navigate({
+                                            pathname: '/(rider)/orderDetails',
+                                            params: { id: popupOrder.id },
+                                        } as any);
+                                    }}
+                                >
+                                    <Text style={styles.modalViewText}>View Order</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+                </Modal>
+            )}
             {renderHeader()}
             {renderFilters()}
             {renderTabs()}
@@ -271,5 +342,81 @@ const styles = StyleSheet.create({
         marginTop: 16,
         fontSize: 16,
         color: '#999',
+    },
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        justifyContent: 'flex-end',
+    },
+    modalContent: {
+        backgroundColor: '#fff',
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        padding: 20,
+        paddingBottom: 30,
+        shadowColor: '#000',
+        shadowOpacity: 0.1,
+        shadowOffset: { width: 0, height: -4 },
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    modalTitle: {
+        fontSize: 20,
+        fontWeight: '800',
+        color: '#221813',
+    },
+    modalOrderId: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#FF5A1F',
+        backgroundColor: '#FFF1ED',
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 8,
+    },
+    modalRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 10,
+    },
+    modalText: {
+        marginLeft: 8,
+        fontSize: 15,
+        color: '#312621',
+        fontWeight: '600',
+    },
+    modalAmount: {
+        color: '#188048',
+        fontWeight: '800',
+    },
+    modalActions: {
+        flexDirection: 'row',
+        gap: 12,
+        marginTop: 14,
+    },
+    modalBtn: {
+        flex: 1,
+        paddingVertical: 12,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    modalDismissBtn: {
+        backgroundColor: '#FFF1ED',
+    },
+    modalDismissText: {
+        color: '#C62828',
+        fontWeight: '700',
+    },
+    modalViewBtn: {
+        backgroundColor: '#FF5A1F',
+    },
+    modalViewText: {
+        color: '#FFF',
+        fontWeight: '800',
     },
 });

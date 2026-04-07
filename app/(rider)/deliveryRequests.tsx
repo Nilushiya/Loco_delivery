@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { Ionicons } from '@expo/vector-icons';
 import apiClient from "../../api/client"; // Ensure this path is correct based on your folder structure
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useRouter } from "expo-router";
 import { BASE_URL } from "../../constants/Config";
 
 export type ApiResponse = {
@@ -62,6 +62,8 @@ const POLLING_INTERVAL_MS = 4000; // 4 seconds
 const ORDERS_ENDPOINT = "/order/get-by-status/HANDED_OVER";
 
 const DeliveryRequestsScreen = () => {
+  console.log("DeliveryRequests component render");
+  const router = useRouter();
   const [deliveryPersonId, setDeliveryPersonId] = useState<number | null>(null);
 
   const [requests, setRequests] = useState<DeliveryOrder[]>([]);
@@ -72,9 +74,19 @@ const DeliveryRequestsScreen = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [lastPollAt, setLastPollAt] = useState<string | null>(null);
   const [lastStatus, setLastStatus] = useState<number | null>(null);
+  const ignoredOrderIdsRef = useRef<Set<number>>(new Set());
+  const formatApiError = (error: unknown) => {
+    const err = error as any;
+    const status = err?.response?.status;
+    const data = err?.response?.data;
+    const message = err?.message || "Unknown error";
+    const dataText = typeof data === "string" ? data : JSON.stringify(data);
+    return `[${status ?? "no-status"}] ${message}${data ? ` | ${dataText}` : ""}`;
+  };
 
   // Get IDs from SecureStore on mount
   useEffect(() => {
+    console.log("DeliveryRequests mounted");
     const fetchId = async () => {
       try {
         const storedUserId = await SecureStore.getItemAsync('userId');
@@ -126,7 +138,9 @@ const DeliveryRequestsScreen = () => {
           const prevIds = new Set(prevRequests.map((o) => o.id));
           const fetchedIds = new Set(fetchedOrders.map((o) => o.id));
 
-          const newOrders = fetchedOrders.filter((o) => !prevIds.has(o.id));
+          const newOrders = fetchedOrders.filter(
+            (o) => !prevIds.has(o.id) && !ignoredOrderIdsRef.current.has(o.id)
+          );
           const stillValid = prevRequests.filter((o) => fetchedIds.has(o.id));
 
           if (newOrders.length > 0) {
@@ -187,6 +201,24 @@ const DeliveryRequestsScreen = () => {
     }, [fetchDeliveryRequests])
   );
 
+  // Fallback polling in case focus events are not firing
+  useEffect(() => {
+    console.log("DeliveryRequests fallback polling enabled");
+    let intervalId: NodeJS.Timeout | null = null;
+
+    const startPolling = () => {
+      if (intervalId) clearInterval(intervalId);
+      intervalId = setInterval(fetchDeliveryRequests, POLLING_INTERVAL_MS) as any;
+    };
+
+    fetchDeliveryRequests().finally(() => setIsInitialLoading(false));
+    startPolling();
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [fetchDeliveryRequests]);
+
   // Handle Manual Pull-to-Refresh
   const onRefresh = useCallback(async () => {
     setIsRefreshing(true);
@@ -198,17 +230,40 @@ const DeliveryRequestsScreen = () => {
 
   // Handle Accept Action
   const handleAccept = async (orderId: number) => {
+    const deliveryPersonIdValue = deliveryPersonId;
+    const order = requests.find((o) => o.id === orderId);
+
+    if (!order || !deliveryPersonIdValue) {
+      Alert.alert("Error", "Missing order details or delivery person ID.");
+      return;
+    }
+
     // Optimistic UI Update: Remove item immediately
     setRequests((prev) => prev.filter((order) => order.id !== orderId));
     setPopupOrderId((prev) => (prev === orderId ? null : prev));
 
     try {
-      // Replace with your API call to accept the order
-      // await apiClient.post(`/delivery-person/accept/${orderId}`);
-      console.log(`Accepted order ${orderId}`);
+      console.log(
+        `Accepting order ${order.id} for delivery person ${deliveryPersonIdValue} at station ${order.stationId} on train ${order.trainId}`
+      );
+      await apiClient.put("/order/claim-delivery", {
+        orderId: order.id,
+        deliveryPersonId: deliveryPersonIdValue,
+        trainId: order.trainId,
+        stationId: order.stationId,
+      });
+
+      ignoredOrderIdsRef.current.add(orderId);
+      const orderJson = JSON.stringify(order);
+      router.navigate({
+        pathname: "/(rider)/activeOrder",
+        params: { order: orderJson },
+      } as any);
     } catch (error) {
-      console.error("Failed to accept order, reverting UI", error);
-      Alert.alert("Error", "Could not accept the order. Please try again.");
+      const details = formatApiError(error);
+      console.error("Failed to accept order, reverting UI", details);
+      Alert.alert("Error", details);
+      ignoredOrderIdsRef.current.delete(orderId);
       // If it fails, trigger a refetch to restore the item
       fetchDeliveryRequests();
     }
@@ -224,9 +279,11 @@ const DeliveryRequestsScreen = () => {
       // Replace with your API call to reject/ignore the order locally
       // e.g. await apiClient.post(`/delivery-person/reject/${orderId}`) or just local dismissal
       console.log(`Rejected order ${orderId}`);
+      ignoredOrderIdsRef.current.add(orderId);
     } catch (error) {
       console.error("Failed to reject order", error);
       Alert.alert("Error", "Could not reject the order.");
+      ignoredOrderIdsRef.current.delete(orderId);
       fetchDeliveryRequests();
     }
   };
