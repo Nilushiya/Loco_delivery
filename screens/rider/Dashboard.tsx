@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Modal, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
 import apiClient from '../../api/client';
 import { OrderCard } from '../../components/OrderCard';
 
@@ -17,6 +18,7 @@ export const Dashboard = () => {
     const [popupOrderId, setPopupOrderId] = useState<string | null>(null);
     const prevOrderIdsRef = useRef<Set<string>>(new Set());
     const didInitRef = useRef(false);
+    const dismissedIdsRef = useRef<Set<string>>(new Set());
 
     const loadOrders = async () => {
         try {
@@ -44,10 +46,14 @@ export const Dashboard = () => {
                     : [],
                 totalAmount: item.total || 0,
                 status: item.status, 
-                stationId: item.stationId?.toString() || ''
+                stationId: item.stationId?.toString() || '',
+                trainId: item.trainId,
+                stationIdNum: item.stationId,
+                raw: item,
             }));
-            
-            setOrders(mappedOrders);
+
+            const visibleOrders = mappedOrders.filter(o => !dismissedIdsRef.current.has(o.id));
+            setOrders(visibleOrders);
             setStatus('succeeded');
             
             if (fetchedOrders.length > 0 && fetchedOrders[0].station) {
@@ -90,6 +96,37 @@ export const Dashboard = () => {
         const matchSeat = !seatFilter || order.seatNumber?.toLowerCase().includes(seatFilter.toLowerCase());
         return matchTrain && matchSeat;
     });
+
+    const acceptOrder = async (order: any) => {
+        try {
+            const storedUserId = await SecureStore.getItemAsync('userId');
+            const deliveryPersonId = storedUserId ? Number(storedUserId) : null;
+            if (!deliveryPersonId || !order?.raw) return;
+
+            await apiClient.put('/order/claim-delivery', {
+                orderId: order.raw.id,
+                deliveryPersonId,
+                trainId: order.raw.trainId,
+                stationId: order.raw.stationId,
+            });
+
+            dismissedIdsRef.current.add(order.id);
+            setOrders(prev => prev.filter(o => o.id !== order.id));
+            setPopupOrderId(null);
+            router.navigate({
+                pathname: '/(rider)/activeOrder',
+                params: { order: JSON.stringify(order.raw) },
+            } as any);
+        } catch (error) {
+            console.error('Failed to accept order', error);
+        }
+    };
+
+    const closeOrderCard = (orderId: string) => {
+        dismissedIdsRef.current.add(orderId);
+        setOrders(prev => prev.filter(o => o.id !== orderId));
+        if (popupOrderId === orderId) setPopupOrderId(null);
+    };
 
     const renderHeader = () => (
         <View style={styles.header}>
@@ -135,6 +172,7 @@ export const Dashboard = () => {
     }
 
     const popupOrder = popupOrderId ? orders.find(o => o.id === popupOrderId) : null;
+    const popupOrderRaw = popupOrder?.raw || null;
 
     return (
         <View style={styles.container}>
@@ -143,25 +181,46 @@ export const Dashboard = () => {
                     <View style={styles.modalOverlay}>
                         <View style={styles.modalContent}>
                             <View style={styles.modalHeader}>
-                                <Text style={styles.modalTitle}>New Order</Text>
-                                <Text style={styles.modalOrderId}>{popupOrder.id}</Text>
+                                <Text style={styles.modalTitle}>New Delivery Request</Text>
+                                <Text style={styles.modalOrderId}>#{popupOrder.id}</Text>
                             </View>
 
-                            <View style={styles.modalRow}>
-                                <Ionicons name="train-outline" size={18} color="#FF5A1F" />
-                                <Text style={styles.modalText}>
-                                    {popupOrder.trainNumber} - {popupOrder.trainName}
-                                </Text>
+                            <View style={styles.modalSection}>
+                                <View style={styles.modalIconBox}>
+                                    <Ionicons name="person" size={20} color="#FF5A1F" />
+                                </View>
+                                <View style={styles.modalTextGroup}>
+                                    <Text style={styles.modalLabel}>Customer</Text>
+                                    <Text style={styles.modalValue}>{popupOrder.customerName || "Customer"}</Text>
+                                    {popupOrder.customerPhone ? (
+                                        <Text style={styles.modalSubValue}>{popupOrder.customerPhone}</Text>
+                                    ) : null}
+                                </View>
                             </View>
-                            <View style={styles.modalRow}>
-                                <Ionicons name="apps-outline" size={18} color="#FF5A1F" />
-                                <Text style={styles.modalText}>Seat: {popupOrder.seatNumber}</Text>
+
+                            <View style={styles.modalSection}>
+                                <View style={styles.modalIconBox}>
+                                    <Ionicons name="train" size={20} color="#FF5A1F" />
+                                </View>
+                                <View style={styles.modalTextGroup}>
+                                    <Text style={styles.modalLabel}>Train & Seat</Text>
+                                    <Text style={styles.modalValue}>
+                                        {popupOrder.trainNumber} - {popupOrder.trainName}
+                                    </Text>
+                                    <Text style={styles.modalSubValue}>Seat: {popupOrder.seatNumber}</Text>
+                                </View>
                             </View>
-                            <View style={styles.modalRow}>
-                                <Ionicons name="cash-outline" size={18} color="#188048" />
-                                <Text style={[styles.modalText, styles.modalAmount]}>
-                                    Rs. {popupOrder.totalAmount}
-                                </Text>
+
+                            <View style={styles.modalSection}>
+                                <View style={[styles.modalIconBox, styles.modalCashBox]}>
+                                    <Ionicons name="cash" size={20} color="#188048" />
+                                </View>
+                                <View style={styles.modalTextGroup}>
+                                    <Text style={styles.modalLabel}>Amount to Collect</Text>
+                                    <Text style={[styles.modalValue, styles.modalAmount]}>
+                                        Rs. {popupOrder.totalAmount}
+                                    </Text>
+                                </View>
                             </View>
 
                             <View style={styles.modalActions}>
@@ -169,19 +228,15 @@ export const Dashboard = () => {
                                     style={[styles.modalBtn, styles.modalDismissBtn]}
                                     onPress={() => setPopupOrderId(null)}
                                 >
-                                    <Text style={styles.modalDismissText}>Dismiss</Text>
+                                    <Text style={styles.modalDismissText}>Reject</Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity
                                     style={[styles.modalBtn, styles.modalViewBtn]}
                                     onPress={() => {
-                                        setPopupOrderId(null);
-                                        router.navigate({
-                                            pathname: '/(rider)/orderDetails',
-                                            params: { id: popupOrder.id },
-                                        } as any);
+                                        acceptOrder({ ...popupOrder, raw: popupOrderRaw });
                                     }}
                                 >
-                                    <Text style={styles.modalViewText}>View Order</Text>
+                                    <Text style={styles.modalViewText}>Accept</Text>
                                 </TouchableOpacity>
                             </View>
                         </View>
@@ -195,10 +250,26 @@ export const Dashboard = () => {
                 data={filteredOrders}
                 keyExtractor={item => item.id}
                 renderItem={({ item }) => (
-                    <OrderCard
-                        order={item}
-                        onPress={() => router.navigate('/(rider)/orderDetails' as any)}
-                    />
+                    <View style={styles.cardWrap}>
+                        <OrderCard
+                            order={item}
+                            onPress={() => router.navigate('/(rider)/orderDetails' as any)}
+                        />
+                        <View style={styles.cardActions}>
+                            <TouchableOpacity
+                                style={[styles.cardBtn, styles.cardCloseBtn]}
+                                onPress={() => closeOrderCard(item.id)}
+                            >
+                                <Text style={styles.cardCloseText}>Close</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.cardBtn, styles.cardAcceptBtn]}
+                                onPress={() => acceptOrder(item)}
+                            >
+                                <Text style={styles.cardAcceptText}>Accept</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
                 )}
                 refreshControl={
                     <RefreshControl refreshing={status === 'loading'} onRefresh={loadOrders} />
@@ -284,6 +355,37 @@ const styles = StyleSheet.create({
         paddingBottom: 24,
         paddingTop: 8,
     },
+    cardWrap: {
+        marginBottom: 8,
+    },
+    cardActions: {
+        flexDirection: 'row',
+        gap: 10,
+        marginHorizontal: 16,
+        marginTop: -4,
+        marginBottom: 8,
+    },
+    cardBtn: {
+        flex: 1,
+        paddingVertical: 10,
+        borderRadius: 10,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    cardCloseBtn: {
+        backgroundColor: '#FFF1ED',
+    },
+    cardCloseText: {
+        color: '#C62828',
+        fontWeight: '700',
+    },
+    cardAcceptBtn: {
+        backgroundColor: '#FF5A1F',
+    },
+    cardAcceptText: {
+        color: '#FFF',
+        fontWeight: '800',
+    },
     emptyContainer: {
         alignItems: 'center',
         justifyContent: 'center',
@@ -329,16 +431,49 @@ const styles = StyleSheet.create({
         paddingVertical: 4,
         borderRadius: 8,
     },
-    modalRow: {
+    modalSection: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 10,
+        marginBottom: 14,
+        backgroundColor: '#FAFAFD',
+        padding: 14,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: '#F0F0F5',
     },
-    modalText: {
-        marginLeft: 8,
-        fontSize: 15,
-        color: '#312621',
-        fontWeight: '600',
+    modalIconBox: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: '#FFF1ED',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 14,
+    },
+    modalCashBox: {
+        backgroundColor: '#E8F5E9',
+    },
+    modalTextGroup: {
+        flex: 1,
+    },
+    modalLabel: {
+        fontSize: 12,
+        color: '#7A6D65',
+        textTransform: 'uppercase',
+        fontWeight: '700',
+        letterSpacing: 0.5,
+        marginBottom: 4,
+    },
+    modalValue: {
+        fontSize: 16,
+        color: '#221813',
+        fontWeight: '700',
+    },
+    modalSubValue: {
+        fontSize: 13,
+        color: '#7A6D65',
+        fontWeight: '500',
+        marginTop: 2,
     },
     modalAmount: {
         color: '#188048',
