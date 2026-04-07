@@ -51,6 +51,7 @@ const LoginScreen = () => {
 
     try {
       await dispatch(authService.login(email.trim(), password));
+      router.replace("/");
     } catch (error: any) {
       const msg = error?.response?.data?.message || "Something went wrong";
       const status = error?.response?.status;

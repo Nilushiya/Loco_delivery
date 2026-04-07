@@ -7,7 +7,7 @@ import { Platform } from 'react-native';
 // Load from .env
 const EXPO_PUBLIC_API_URL = process.env.EXPO_PUBLIC_API_URL;
 const WEB_API_URL = "http://localhost:3001";
-const MOBILE_API_URL = EXPO_PUBLIC_API_URL || "http://172.19.8.0:3001"; // for mobile devices
+const MOBILE_API_URL = "http://192.168.8.178:3001"; // for mobile devices
 const PROD_API_URL = process.env.EXPO_PUBLIC_PROD_API_URL;     // for production server
 
 // Determine current environment
