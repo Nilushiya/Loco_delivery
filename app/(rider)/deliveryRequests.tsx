@@ -9,8 +9,12 @@ import {
   TouchableOpacity,
   View,
   AppState,
+  Modal,
 } from "react-native";
+import { Ionicons } from '@expo/vector-icons';
 import apiClient from "../../api/client"; // Ensure this path is correct based on your folder structure
+import { useFocusEffect } from "@react-navigation/native";
+import { BASE_URL } from "../../constants/Config";
 
 export type ApiResponse = {
   success: boolean;
@@ -55,6 +59,7 @@ export type DeliveryOrder = {
 import * as SecureStore from 'expo-secure-store';
 
 const POLLING_INTERVAL_MS = 4000; // 4 seconds
+const ORDERS_ENDPOINT = "/order/get-by-status/HANDED_OVER";
 
 const DeliveryRequestsScreen = () => {
   const [deliveryPersonId, setDeliveryPersonId] = useState<number | null>(null);
@@ -63,14 +68,19 @@ const DeliveryRequestsScreen = () => {
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const isFetchingRef = useRef(false);
+  const [popupOrderId, setPopupOrderId] = useState<number | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [lastPollAt, setLastPollAt] = useState<string | null>(null);
+  const [lastStatus, setLastStatus] = useState<number | null>(null);
 
-  // Get the ID from SecureStore on mount
+  // Get IDs from SecureStore on mount
   useEffect(() => {
     const fetchId = async () => {
       try {
-        const storedId = await SecureStore.getItemAsync('userId');
-        if (storedId) {
-          setDeliveryPersonId(Number(storedId));
+        const storedUserId = await SecureStore.getItemAsync('userId');
+
+        if (storedUserId) {
+          setDeliveryPersonId(Number(storedUserId));
         } else {
           setIsInitialLoading(false); // No id, stop loading animation
         }
@@ -82,14 +92,24 @@ const DeliveryRequestsScreen = () => {
     fetchId();
   }, []);
 
-  // Fetch Delivery Requests Function
   const fetchDeliveryRequests = useCallback(async () => {
-    // Prevent overlapping network requests, or fetching if no valid ID
-    if (!deliveryPersonId || isFetchingRef.current) return;
+    console.log("fetchDeliveryRequests called");
+    // Prevent overlapping network requests
+    if (isFetchingRef.current) return;
     
     isFetchingRef.current = true;
     try {
-      const response = await apiClient.get(`/order/delivery/get?deliveryPersonId=${deliveryPersonId}`);
+      setErrorMessage(null);
+      console.log("Fetching delivery requests with HANDED_OVER status...");
+      const response = await apiClient.get(ORDERS_ENDPOINT, { timeout: 10000 });
+
+      if (!response || response.status < 200 || response.status >= 300) {
+        throw new Error(`Unexpected response status: ${response?.status ?? "unknown"}`);
+      }
+
+      console.log("Fetched delivery requests:", response.data);
+      setLastPollAt(new Date().toISOString());
+      setLastStatus(response.status);
       
       // Extremely safe payload unpacking to prevent "Cannot read property 'orders' of undefined"
       const responseData = response ? response.data : null;
@@ -103,54 +123,69 @@ const DeliveryRequestsScreen = () => {
 
       if (Array.isArray(fetchedOrders)) {
         setRequests((prevRequests) => {
-          const newOrders = fetchedOrders.filter(
-            (newOrder) => !prevRequests.some((prevOrder) => prevOrder.id === newOrder.id)
-          );
+          const prevIds = new Set(prevRequests.map((o) => o.id));
+          const fetchedIds = new Set(fetchedOrders.map((o) => o.id));
 
-          if (newOrders.length === 0) return prevRequests;
-          return [...newOrders, ...prevRequests];
+          const newOrders = fetchedOrders.filter((o) => !prevIds.has(o.id));
+          const stillValid = prevRequests.filter((o) => fetchedIds.has(o.id));
+
+          if (newOrders.length > 0) {
+            // Pop up the newest incoming order
+            setPopupOrderId(newOrders[0].id);
+          }
+
+          if (newOrders.length === 0 && stillValid.length === prevRequests.length) {
+            return prevRequests;
+          }
+
+          return [...newOrders, ...stillValid];
         });
+      } else {
+        setErrorMessage("Unexpected response format.");
       }
     } catch (error) {
       console.error("Failed to fetch delivery requests", error);
+      const statusFromError = (error as any)?.response?.status ?? null;
+      if (statusFromError) {
+        setLastStatus(statusFromError);
+      }
+      setErrorMessage("Failed to load delivery requests.");
     } finally {
       isFetchingRef.current = false;
       setIsInitialLoading(false);
     }
-  }, [deliveryPersonId]);
+  }, []);
 
   // Handle Polling and Application State
-  useEffect(() => {
-    // Initial fetch
-    fetchDeliveryRequests().finally(() => setIsInitialLoading(false));
+  useFocusEffect(
+    useCallback(() => {
+      console.log("DeliveryRequests screen focused");
+      let intervalId: NodeJS.Timeout | null = null;
 
-    let intervalId: NodeJS.Timeout;
+      const startPolling = () => {
+        if (intervalId) clearInterval(intervalId);
+        intervalId = setInterval(fetchDeliveryRequests, POLLING_INTERVAL_MS) as any;
+      };
 
-    // Start polling function
-    const startPolling = () => {
-      if (intervalId) clearInterval(intervalId);
-      intervalId = setInterval(fetchDeliveryRequests, POLLING_INTERVAL_MS) as any;
-    };
+      // Initial fetch when screen is focused
+      fetchDeliveryRequests().finally(() => setIsInitialLoading(false));
+      startPolling();
 
-    // Subscribing to Application State (Background / Foreground)
-    // We only poll when the app is active
-    const subscription = AppState.addEventListener("change", (nextAppState) => {
-      if (nextAppState === "active") {
-        fetchDeliveryRequests(); // Immediate fetch on resume
-        startPolling();
-      } else {
-        clearInterval(intervalId);
-      }
-    });
+      const subscription = AppState.addEventListener("change", (nextAppState) => {
+        if (nextAppState === "active") {
+          fetchDeliveryRequests();
+          startPolling();
+        } else if (intervalId) {
+          clearInterval(intervalId);
+        }
+      });
 
-    startPolling();
-
-    // Cleanup interval and event listener on unmount
-    return () => {
-      if (intervalId) clearInterval(intervalId);
-      subscription.remove();
-    };
-  }, [fetchDeliveryRequests]);
+      return () => {
+        if (intervalId) clearInterval(intervalId);
+        subscription.remove();
+      };
+    }, [fetchDeliveryRequests])
+  );
 
   // Handle Manual Pull-to-Refresh
   const onRefresh = useCallback(async () => {
@@ -165,6 +200,7 @@ const DeliveryRequestsScreen = () => {
   const handleAccept = async (orderId: number) => {
     // Optimistic UI Update: Remove item immediately
     setRequests((prev) => prev.filter((order) => order.id !== orderId));
+    setPopupOrderId((prev) => (prev === orderId ? null : prev));
 
     try {
       // Replace with your API call to accept the order
@@ -182,6 +218,7 @@ const DeliveryRequestsScreen = () => {
   const handleReject = async (orderId: number) => {
     // Optimistic UI Update: Remove item immediately
     setRequests((prev) => prev.filter((order) => order.id !== orderId));
+    setPopupOrderId((prev) => (prev === orderId ? null : prev));
 
     try {
       // Replace with your API call to reject/ignore the order locally
@@ -231,9 +268,95 @@ const DeliveryRequestsScreen = () => {
     </View>
   );
 
+  const currentOrder = popupOrderId
+    ? requests.find((o) => o.id === popupOrderId) || null
+    : null;
+
   return (
     <View style={styles.container}>
+      {currentOrder && (
+        <Modal transparent animationType="slide" visible={!!currentOrder}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>New Delivery Request!</Text>
+                <Text style={styles.modalOrderId}>#{currentOrder.id}</Text>
+              </View>
+              
+              <View style={styles.modalSection}>
+                <View style={styles.iconBox}>
+                  <Ionicons name="person" size={22} color="#FF5A1F" />
+                </View>
+                <View style={styles.modalTextGroup}>
+                  <Text style={styles.modalLabel}>User Details</Text>
+                  <Text style={styles.modalValue}>
+                    {currentOrder.user?.firstname || 'Unknown User'} {currentOrder.user?.lastname || ''}
+                  </Text>
+                  {currentOrder.user?.phoneNumber && (
+                    <Text style={styles.modalSubValue}>{currentOrder.user.phoneNumber}</Text>
+                  )}
+                </View>
+              </View>
+
+              <View style={styles.modalSection}>
+                <View style={[styles.iconBox, { backgroundColor: '#E8F5E9' }]}>
+                  <Ionicons name="cash" size={22} color="#188048" />
+                </View>
+                <View style={styles.modalTextGroup}>
+                  <Text style={styles.modalLabel}>Amount to Collect</Text>
+                  <Text style={[styles.modalValue, { color: '#188048', fontSize: 26, fontWeight: '800' }]}>
+                    ₹{currentOrder.total}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.modalSection}>
+                <View style={styles.iconBox}>
+                  <Ionicons name="train" size={22} color="#FF5A1F" />
+                </View>
+                <View style={styles.modalTextGroup}>
+                  <Text style={styles.modalLabel}>Seat Details</Text>
+                  <Text style={styles.modalValue}>Seat: {currentOrder.seatNumber}</Text>
+                  <Text style={styles.modalSubValue}>
+                    Train: {currentOrder.train?.trainName || currentOrder.train?.name || currentOrder.train?.trainNo || 'Unknown Train'}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={[styles.modalBtn, styles.modalRejectBtn]}
+                  onPress={() => handleReject(currentOrder.id)}
+                >
+                  <Text style={styles.modalRejectText}>Reject</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalBtn, styles.modalAcceptBtn]}
+                  onPress={() => handleAccept(currentOrder.id)}
+                >
+                  <Text style={styles.modalAcceptText}>Accept Order</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
       <Text style={styles.title}>New Delivery Requests</Text>
+      <View style={styles.debugRow}>
+        <Text style={styles.debugText}>API: {BASE_URL}{ORDERS_ENDPOINT}</Text>
+      </View>
+      <View style={styles.debugRow}>
+        <Text style={styles.debugText}>Last poll: {lastPollAt ?? "—"}</Text>
+      </View>
+      <View style={styles.debugRow}>
+        <Text style={styles.debugText}>Last status: {lastStatus ?? "—"}</Text>
+      </View>
+      {errorMessage ? (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorText}>{errorMessage}</Text>
+        </View>
+      ) : null}
 
       {isInitialLoading ? (
         <ActivityIndicator size="large" color="#FF5A1F" style={styles.loader} />
@@ -375,5 +498,142 @@ const styles = StyleSheet.create({
   emptySubtext: {
     fontSize: 14,
     color: "#8A7D76",
+  },
+  errorBanner: {
+    backgroundColor: "#FFF1ED",
+    borderColor: "#F3C6BA",
+    borderWidth: 1,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+  },
+  errorText: {
+    color: "#C62828",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  debugRow: {
+    paddingHorizontal: 16,
+    paddingTop: 4,
+  },
+  debugText: {
+    fontSize: 12,
+    color: "#6B5E57",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    paddingBottom: 40,
+    elevation: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0E9E6',
+    paddingBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#221813',
+  },
+  modalOrderId: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FF5A1F',
+    backgroundColor: '#FFF1ED',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  modalSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+    backgroundColor: '#FAFAFD',
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#F0F0F5',
+  },
+  iconBox: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#FFF1ED',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  modalTextGroup: {
+    flex: 1,
+  },
+  modalLabel: {
+    fontSize: 13,
+    color: '#7A6D65',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  modalValue: {
+    fontSize: 18,
+    color: '#221813',
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  modalSubValue: {
+    fontSize: 14,
+    color: '#7A6D65',
+    fontWeight: '500',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 16,
+    marginTop: 10,
+  },
+  modalBtn: {
+    flex: 1,
+    paddingVertical: 16,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalRejectBtn: {
+    backgroundColor: '#FFF1ED',
+  },
+  modalRejectText: {
+    color: '#C62828',
+    fontWeight: '800',
+    fontSize: 16,
+  },
+  modalAcceptBtn: {
+    backgroundColor: '#FF5A1F',
+    shadowColor: '#FF5A1F',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  modalAcceptText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 16,
   },
 });

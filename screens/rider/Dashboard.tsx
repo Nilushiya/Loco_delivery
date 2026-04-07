@@ -2,22 +2,64 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { useDispatch, useSelector } from 'react-redux';
+import * as SecureStore from 'expo-secure-store';
+import apiClient from '../../api/client';
 import { OrderCard } from '../../components/OrderCard';
-import { fetchOrders } from '../../redux/slices/orderSlice';
-import { AppDispatch, RootState } from '../../redux/store';
 
 export const Dashboard = () => {
-    const dispatch = useDispatch<AppDispatch>();
     const router = useRouter();
-    const { orders, status, assignedStation } = useSelector((state: RootState) => state.orders);
+
+    const [orders, setOrders] = useState<any[]>([]);
+    const [status, setStatus] = useState<'idle' | 'loading' | 'succeeded' | 'failed'>('idle');
+    const [assignedStation, setAssignedStation] = useState('Loading...');
 
     const [activeTab, setActiveTab] = useState<'Pending' | 'Delivered'>('Pending');
     const [trainFilter, setTrainFilter] = useState('');
     const [seatFilter, setSeatFilter] = useState('');
 
-    const loadOrders = () => {
-        dispatch(fetchOrders(assignedStation));
+    const loadOrders = async () => {
+        try {
+            setStatus('loading');
+            const deliveryPersonId = await SecureStore.getItemAsync('userId');
+            if (!deliveryPersonId) {
+                setStatus('failed');
+                return;
+            }
+            
+            const response = await apiClient.get(`/order/delivery/get?deliveryPersonId=${deliveryPersonId}`);
+            
+            let fetchedOrders: any[] = [];
+            if (response.data && Array.isArray(response.data.orders)) {
+                fetchedOrders = response.data.orders;
+            } else if (response.data && Array.isArray(response.data.data)) {
+                fetchedOrders = response.data.data;
+            }
+            
+            const mappedOrders = fetchedOrders.map((item: any) => ({
+                id: item.id?.toString() || 'N/A',
+                customerName: item.user ? `${item.user.firstname || ''} ${item.user.lastname || ''}`.trim() : 'Unknown',
+                customerPhone: item.user?.phoneNumber || '',
+                trainName: item.train?.trainName || item.train?.name || 'Train',
+                trainNumber: item.train?.trainNo || item.train?.id || '',
+                seatNumber: item.seatNumber || '',
+                foodItems: Array.isArray(item.items) ? item.items.map((i: any) => ({ name: i.menuItem?.name || 'Item', quantity: i.quantity || 1 })) : [],
+                totalAmount: item.total || 0,
+                status: item.status, 
+                stationId: item.stationId?.toString() || ''
+            }));
+            
+            setOrders(mappedOrders);
+            setStatus('succeeded');
+            
+            if (fetchedOrders.length > 0 && fetchedOrders[0].station) {
+               setAssignedStation(fetchedOrders[0].station.name);
+            } else {
+               setAssignedStation('No Station');
+            }
+        } catch (error) {
+            console.error('Failed to load orders', error);
+            setStatus('failed');
+        }
     };
 
     useEffect(() => {
@@ -30,9 +72,10 @@ export const Dashboard = () => {
     }, []);
 
     const filteredOrders = orders.filter(order => {
-        const matchTab = order.status === activeTab;
-        const matchTrain = !trainFilter || order.trainNumber.includes(trainFilter) || order.trainName.toLowerCase().includes(trainFilter.toLowerCase());
-        const matchSeat = !seatFilter || order.seatNumber.toLowerCase().includes(seatFilter.toLowerCase());
+        const expectedStatus = activeTab === 'Pending' ? 'OUT_FOR_DELIVERY' : 'DELIVERED';
+        const matchTab = order.status === expectedStatus;
+        const matchTrain = !trainFilter || order.trainNumber?.includes(trainFilter) || order.trainName?.toLowerCase().includes(trainFilter.toLowerCase());
+        const matchSeat = !seatFilter || order.seatNumber?.toLowerCase().includes(seatFilter.toLowerCase());
         return matchTab && matchTrain && matchSeat;
     });
 

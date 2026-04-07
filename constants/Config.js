@@ -13,10 +13,8 @@ const PROD_API_URL = process.env.EXPO_PUBLIC_PROD_API_URL;     // for production
 // Determine current environment
 const ENV = {
   apiUrl: __DEV__
-    ? Platform.OS === 'web'
-      ? WEB_API_URL
-      : MOBILE_API_URL
-    : PROD_API_URL,
+    ? (EXPO_PUBLIC_API_URL || (Platform.OS === 'web' ? WEB_API_URL : MOBILE_API_URL))
+    : (PROD_API_URL || EXPO_PUBLIC_API_URL),
   envName: __DEV__ ? 'Dev' : 'Prod',
 };
 
