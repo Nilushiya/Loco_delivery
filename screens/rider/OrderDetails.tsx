@@ -19,8 +19,8 @@ export const OrderDetails = () => {
   const router = useRouter();
   const dispatch = useDispatch<AppDispatch>();
 
-  const order = useSelector((state) =>
-    state.orders.orders.find((o) => o.id === id),
+  const order = useSelector((state: any) =>
+    state.orders.orders.find((o: any) => o.id === id),
   );
 
   const [loading, setLoading] = React.useState(false);
