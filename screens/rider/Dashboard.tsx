@@ -276,9 +276,14 @@ export const Dashboard = () => {
                 }
                 contentContainerStyle={styles.listContainer}
                 ListEmptyComponent={
-                    <View style={styles.emptyContainer}>
-                        <Ionicons name="documents-outline" size={64} color="#DDD" />
-                        <Text style={styles.emptyText}>No new orders found.</Text>
+                    <View style={styles.emptyState}>
+                        <View style={styles.emptyIconWrap}>
+                            <Ionicons name="bicycle-outline" size={44} color="#FF5A1F" />
+                        </View>
+                        <Text style={styles.emptyTitle}>No new orders yet</Text>
+                        <Text style={styles.emptySubtitle}>
+                            We’ll show new delivery requests here as soon as they’re handed over.
+                        </Text>
                     </View>
                 }
             />
@@ -386,15 +391,32 @@ const styles = StyleSheet.create({
         color: '#FFF',
         fontWeight: '800',
     },
-    emptyContainer: {
+    emptyState: {
         alignItems: 'center',
         justifyContent: 'center',
         paddingTop: 60,
+        paddingHorizontal: 24,
     },
-    emptyText: {
-        marginTop: 16,
-        fontSize: 16,
-        color: '#999',
+    emptyIconWrap: {
+        width: 72,
+        height: 72,
+        borderRadius: 36,
+        backgroundColor: '#FFF1ED',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 12,
+    },
+    emptyTitle: {
+        fontSize: 18,
+        fontWeight: '800',
+        color: '#221813',
+        marginBottom: 6,
+    },
+    emptySubtitle: {
+        fontSize: 14,
+        color: '#7A6D65',
+        textAlign: 'center',
+        lineHeight: 20,
     },
     modalOverlay: {
         flex: 1,
