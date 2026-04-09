@@ -8,9 +8,11 @@ import {
   View,
 } from "react-native";
 import apiClient from "../../api/client";
+import { useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 
 export default function RiderProfileScreen() {
+  const router = useRouter();
   const [isLoading, setIsLoading] = useState(true);
   const [profile, setProfile] = useState<any | null>(null);
 
@@ -93,6 +95,7 @@ export default function RiderProfileScreen() {
             await SecureStore.deleteItemAsync("userToken");
             await SecureStore.deleteItemAsync("userId");
             await SecureStore.deleteItemAsync("userRole");
+            router.replace("/(auth)/login");
           } catch (error) {
             console.error("Failed to clear storage", error);
           }
